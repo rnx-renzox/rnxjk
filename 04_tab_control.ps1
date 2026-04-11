@@ -83,15 +83,15 @@ $CY2=$CY1+$CGH1+$CGAP
 $CY3=$CY2+$CGH2+$CGAP
 
 $grpC1 = New-GBox $tabCtrl "LANZADORES"          $CX $CY1 $CGW $CGH1 "Yellow"
-$grpC2 = New-GBox $tabCtrl "DIAGNOSTICO ADB"     $CX $CY2 $CGW $CGH2 "Cyan"
+$grpC2 = New-GBox $tabCtrl "ARCHIVOS / FIRMWARE"  $CX $CY2 $CGW $CGH2 "Red"
 $grpC3 = New-GBox $tabCtrl "SISTEMA / PC"        $CX $CY3 $CGW $CGH3 "Orange"
 
 $CL1=@("ODIN3","HxD HEX EDITOR","QFIL","USB DRIVERS")
-$CL2=@("TEST PANTALLA","INFO BATERIA","ALMACENAMIENTO","APPS INSTALADAS")
+$CL2=@("ORGANIZAR FIRMWARE","RENOMBRAR ARCHIVOS","EXTRAER FIRMWARE","VERIFICAR CHECKSUM")
 $CL3=@("ADMIN TAREAS","ADMIN DISPOSITIVOS","DESACTIVAR DEFENDER","REINICIAR ADB","MONITOR PC","LIMPIEZA TEMP PC")
 
 $btnsC1=Place-Grid $grpC1 $CL1 "Yellow" 2 $CBTW $CBTH $CPX $CPY $CGX $CGY
-$btnsC2=Place-Grid $grpC2 $CL2 "Cyan"   2 $CBTW $CBTH $CPX $CPY $CGX $CGY
+$btnsC2=Place-Grid $grpC2 $CL2 "Red"     2 $CBTW $CBTH $CPX $CPY $CGX $CGY
 $btnsC3=Place-Grid $grpC3 $CL3 "Orange" 2 $CBTW $CBTH $CPX $CPY $CGX $CGY
 
 # Log columna derecha
@@ -413,437 +413,544 @@ $btnsC1[3].Add_Click({
 
     $btn.Enabled=$true; $btn.Text="USB DRIVERS"
 })
-# ---- C2[0]: TEST PANTALLA ----
+# BLOQUE C2 - ARCHIVOS / FIRMWARE
+#==========================================================================
+
+# ---- [0] ORGANIZAR FIRMWARE ----
 $btnsC2[0].Add_Click({
-    $btn=$btnsC2[0]; $btn.Enabled=$false; $btn.Text="LEYENDO..."
+    $btn = $btnsC2[0]; $btn.Enabled=$false; $btn.Text="ORGANIZANDO..."
     [System.Windows.Forms.Application]::DoEvents()
-    CtrlLog ""
-    CtrlLog "=== TEST PANTALLA ==="
-
-    if (-not (Check-ADB)) { CtrlLog "[!] Sin dispositivo ADB."; $btn.Enabled=$true; $btn.Text="TEST PANTALLA"; return }
-
-    function CtS($cmd) {
-        $r = & adb shell $cmd 2>$null
-        if ($r -is [array]) { return ($r -join " ").Trim() }
-        return "$r".Trim()
-    }
-
-    $res     = CtS "wm size"
-    $dens    = CtS "wm density"
-    $bright  = CtS "settings get system screen_brightness"
-    $brightM = CtS "settings get system screen_brightness_mode"
-    $timeout = CtS "settings get system screen_off_timeout"
-    $ptrLoc  = CtS "settings get system pointer_location"
-
-    CtrlLog "[+] Resolucion    : $res"
-    CtrlLog "[+] Densidad DPI  : $dens"
-    CtrlLog "[+] Brillo        : $bright / 255 $(if($brightM -eq '1'){'(AUTO)'}else{'(MANUAL)'})"
-    $toSec = try { [int]($timeout)/1000 } catch { "?" }
-    CtrlLog "[+] Timeout pantalla: ${toSec}s"
-    CtrlLog "[+] Pointer Location: $(if($ptrLoc -eq '1'){'ACTIVO'}else{'INACTIVO'})"
-    CtrlLog ""
-
-    $frmTest = New-Object System.Windows.Forms.Form
-    $frmTest.Text="TEST PANTALLA - RNX TOOL PRO"; $frmTest.ClientSize=New-Object System.Drawing.Size(360,280)
-    $frmTest.BackColor=[System.Drawing.Color]::FromArgb(20,20,20); $frmTest.FormBorderStyle="FixedDialog"
-    $frmTest.StartPosition="CenterScreen"; $frmTest.TopMost=$true
-
-    function AddLbl($txt,$y,$clr="LightGray",$bold=$false) {
-        $l=New-Object Windows.Forms.Label; $l.Text=$txt
-        $l.Location=New-Object System.Drawing.Point(14,$y); $l.Size=New-Object System.Drawing.Size(332,18)
-        $l.ForeColor=[System.Drawing.Color]::$clr
-        $l.Font=New-Object System.Drawing.Font("Consolas",8,$(if($bold){[System.Drawing.FontStyle]::Bold}else{[System.Drawing.FontStyle]::Regular}))
-        $frmTest.Controls.Add($l)
-    }
-    function AddBtn($txt,$x,$y,$w,$clr,$action) {
-        $b=New-Object Windows.Forms.Button; $b.Text=$txt
-        $b.Location=New-Object System.Drawing.Point($x,$y); $b.Size=New-Object System.Drawing.Size($w,34)
-        $b.FlatStyle="Flat"; $b.ForeColor=[System.Drawing.Color]::$clr
-        $b.FlatAppearance.BorderColor=[System.Drawing.Color]::$clr
-        $b.BackColor=[System.Drawing.Color]::FromArgb(30,30,30)
-        $b.Font=New-Object System.Drawing.Font("Segoe UI",8,[System.Drawing.FontStyle]::Bold)
-        $b.Add_Click($action); $frmTest.Controls.Add($b)
-    }
-    AddLbl "INFORMACION DE PANTALLA" 12 "Cyan" $true
-    AddLbl $res    34 "White"
-    AddLbl $dens   52 "White"
-    AddLbl "Brillo: $bright/255  $(if($brightM -eq '1'){'AUTO'}else{'MANUAL'})" 70 "White"
-    AddLbl "Timeout: ${toSec}s" 88 "White"
-    AddLbl "Pointer Location: $(if($ptrLoc -eq '1'){'ACTIVO (rojo)'}else{'INACTIVO'})" 106 "White"
-
-    AddLbl "ACCIONES RAPIDAS" 136 "Cyan" $true
-    AddBtn "TOGGLE POINTER LOC" 14 158 160 "Yellow" {
-        $cur=(& adb shell "settings get system pointer_location" 2>$null).Trim()
-        $new=if($cur -eq "1"){"0"}else{"1"}
-        & adb shell "settings put system pointer_location $new" 2>$null | Out-Null
-        CtrlLog "[OK] Pointer Location -> $(if($new -eq '1'){'ACTIVO'}else{'INACTIVO'})"
-    }
-    AddBtn "BRILLO MAXIMO" 182 158 152 "Lime" {
-        & adb shell "settings put system screen_brightness 255" 2>$null | Out-Null
-        & adb shell "settings put system screen_brightness_mode 0" 2>$null | Out-Null
-        CtrlLog "[OK] Brillo al maximo (255), modo manual"
-    }
-    AddBtn "BRILLO AUTO" 14 200 160 "Cyan" {
-        & adb shell "settings put system screen_brightness_mode 1" 2>$null | Out-Null
-        CtrlLog "[OK] Brillo automatico activado"
-    }
-    AddBtn "TIMEOUT 10 MIN" 182 200 152 "Orange" {
-        & adb shell "settings put system screen_off_timeout 600000" 2>$null | Out-Null
-        CtrlLog "[OK] Timeout pantalla -> 10 minutos"
-    }
-    AddBtn "CERRAR" 110 242 140 "Gray" { $frmTest.Close() }
-    $frmTest.ShowDialog() | Out-Null
-
-    $btn.Enabled=$true; $btn.Text="TEST PANTALLA"
-})
-
-# ---- C2[1]: INFO BATERIA ----
-$btnsC2[1].Add_Click({
-    $btn=$btnsC2[1]; $btn.Enabled=$false; $btn.Text="LEYENDO..."
-    [System.Windows.Forms.Application]::DoEvents()
-    CtrlLog ""
-    CtrlLog "=== INFO BATERIA ==="
-
-    if (-not (Check-ADB)) { CtrlLog "[!] Sin dispositivo ADB."; $btn.Enabled=$true; $btn.Text="INFO BATERIA"; return }
-
-    function BatS($cmd) {
-        $r = & adb shell $cmd 2>$null
-        if ($r -is [array]) { return ($r -join " ").Trim() }
-        return "$r".Trim()
-    }
-
-    # Dumpsys battery
-    $dump = (& adb shell "dumpsys battery" 2>$null) -join "`n"
-    function ParseBat($key) {
-        if ($dump -match "(?m)$key[:\s]+(.+)") { return $Matches[1].Trim() }
-        return "?"
-    }
-
-    $nivel   = ParseBat "level"
-    $status  = ParseBat "status"     # 1=unknown 2=charging 3=discharging 4=not charging 5=full
-    $health  = ParseBat "health"     # 1=unknown 2=good 3=overheat 4=dead 5=overvoltage 6=failure 7=cold
-    $temp    = ParseBat "temperature"
-    $volt    = ParseBat "voltage"
-    $techno  = ParseBat "technology"
-    $plugged = ParseBat "plugged"
-
-    $statusStr = switch ($status) {
-        "2" { "CARGANDO" } "3" { "DESCARGANDO" } "4" { "NO CARGA" } "5" { "LLENA" } default { "Estado $status" }
-    }
-    $healthStr = switch ($health) {
-        "2" { "BUENA" } "3" { "SOBRECALENTAMIENTO" } "4" { "MUERTA" }
-        "5" { "SOBREVOLTAJE" } "7" { "FRIA" } default { "Estado $health" }
-    }
-    $tempC = try { [math]::Round([double]$temp/10,1) } catch { "?" }
-    $voltV = try { [math]::Round([double]$volt/1000,2) } catch { "?" }
-    $plugStr = switch ($plugged) { "1"{"USB"} "2"{"AC/Pared"} "4"{"Wireless"} default{"No"} }
-
-    CtrlLog "[+] Nivel        : $nivel%"
-    CtrlLog "[+] Estado       : $statusStr  (Cargador: $plugStr)"
-    CtrlLog "[+] Salud        : $healthStr"
-    $tempAlert = if ($tempC -ne "?" -and [double]$tempC -gt 40) { " [ALERTA: >40 grados C]" } else { "" }
-    CtrlLog "[+] Temperatura  : $tempC C$tempAlert"
-    CtrlLog "[+] Voltaje      : $voltV V"
-    CtrlLog "[+] Tecnologia   : $techno"
-
-    # Capacidad via sysfs
-    CtrlLog ""
-    CtrlLog "[~] Leyendo capacidad via sysfs..."
-    $batPath = "/sys/class/power_supply/battery"
-    $altPaths = @("/sys/class/power_supply/Battery", "/sys/class/power_supply/bms", "/sys/class/power_supply/qpnp-qg")
-
-    function ReadSysfs($path) {
-        $r = & adb shell "cat $path 2>/dev/null" 2>$null
-        if ($r) { $v=("$r").Trim(); if ($v -match "^\d") { return $v } }
-        return $null
-    }
-
-    $capNow  = ReadSysfs "$batPath/charge_now"
-    $capFull = ReadSysfs "$batPath/charge_full"
-    $capDes  = ReadSysfs "$batPath/charge_full_design"
-    $curNow  = ReadSysfs "$batPath/current_now"
-    $cyclos  = ReadSysfs "$batPath/cycle_count"
-
-    # Fallback: charge en uAh en vez de uA
-    if (-not $capNow)  { $capNow  = ReadSysfs "$batPath/charge_counter" }
-    if (-not $capFull) {
-        foreach ($ap in $altPaths) {
-            $capFull = ReadSysfs "$ap/charge_full"
-            if ($capFull) { $batPath=$ap; break }
-        }
-    }
-
-    if ($capNow -and $capFull) {
-        $mAhNow  = try { [math]::Round([double]$capNow/1000,0)  } catch { "?" }
-        $mAhFull = try { [math]::Round([double]$capFull/1000,0) } catch { "?" }
-        $mAhDes  = if ($capDes) { try { [math]::Round([double]$capDes/1000,0) } catch { "?" } } else { "?" }
-        CtrlLog "[+] Capacidad actual : $mAhNow mAh"
-        CtrlLog "[+] Capacidad full   : $mAhFull mAh"
-        CtrlLog "[+] Capacidad diseno : $mAhDes mAh"
-        if ($mAhFull -ne "?" -and $mAhDes -ne "?") {
-            $salud = try { [math]::Round(([double]$mAhFull/[double]$mAhDes)*100,1) } catch { "?" }
-            $saludLabel = if ($salud -ne "?") {
-                if    ($salud -ge 85) { "BUENA ($salud%)" }
-                elseif($salud -ge 70) { "ACEPTABLE ($salud%)" }
-                elseif($salud -ge 50) { "DEGRADADA ($salud%)" }
-                else                  { "CRITICA ($salud%)" }
-            } else { "?" }
-            CtrlLog "[+] Salud real       : $saludLabel"
-        }
-    } else {
-        CtrlLog "[~] Datos sysfs no disponibles en este dispositivo"
-    }
-
-    if ($cyclos) { CtrlLog "[+] Ciclos de carga  : $cyclos" }
-    if ($curNow) {
-        $mA = try { [math]::Round([math]::Abs([double]$curNow)/1000,0) } catch { "?" }
-        $dir = if ([double]$curNow -gt 0) { "descargando" } else { "cargando" }
-        CtrlLog "[+] Corriente actual : $mA mA ($dir)"
-    }
-
-    if ($tempAlert) {
+    try {
         CtrlLog ""
-        CtrlLog "[ALERTA] Temperatura elevada: $tempC C"
-        CtrlLog "         Temperatura normal: 20-40 C durante carga"
-        CtrlLog "         Detener carga si supera 45 C continuamente"
-    }
+        CtrlLog "=============================================="
+        CtrlLog "  ORGANIZAR FIRMWARE - RNX TOOL PRO v2"
+        CtrlLog "=============================================="
+        CtrlLog "[~] Selecciona la carpeta con los firmwares..."
 
-    $btn.Enabled=$true; $btn.Text="INFO BATERIA"
-})
+        $fb = New-Object System.Windows.Forms.FolderBrowserDialog
+        $fb.Description = "Selecciona carpeta con firmwares"
+        if ($fb.ShowDialog() -ne "OK") { CtrlLog "[~] Cancelado."; return }
 
-# ---- C2[2]: ALMACENAMIENTO ----
-$btnsC2[2].Add_Click({
-    $btn=$btnsC2[2]; $btn.Enabled=$false; $btn.Text="LEYENDO..."
-    [System.Windows.Forms.Application]::DoEvents()
-    CtrlLog ""; CtrlLog "=== ALMACENAMIENTO ==="
-    if (-not (Check-ADB)) { CtrlLog "[!] Sin dispositivo ADB."; $btn.Enabled=$true; $btn.Text="ALMACENAMIENTO"; return }
+        $source = $fb.SelectedPath
+        $dest   = Join-Path $source "Organizados"
+        New-Item $dest -ItemType Directory -Force | Out-Null
+        CtrlLog "[+] Carpeta origen : $source"
+        CtrlLog "[+] Carpeta destino: $dest"
+        CtrlLog ""
 
-    CtrlLog "[~] Recopilando datos..."
-    [System.Windows.Forms.Application]::DoEvents()
+        # ---- FILTRO DE VINCULACION A CELULARES ----
+        # Solo se mueven archivos cuyo nombre contenga referencia a dispositivo movil
+        $vinculacionPattern = "imei|sn|serial|sm-|xt\d|redmi|poco|xiaomi|miui|samsung|galaxy|motorola|moto|oppo|vivo|realme|tecno|itel|huawei|honor|oneplus|pixel|iphone|nokia|lg |htc|sony|xperia|\d{15}"
 
-    # ---- Recopilar datos ----
-    $dfRaw  = (& adb shell "df -h 2>/dev/null" 2>$null)
-    $memRaw = (& adb shell "cat /proc/meminfo 2>/dev/null" 2>$null) -join "`n"
-    function GetMemMB($key) {
-        if ($memRaw -match "(?m)$key[\:\s]+(\d+)") { return [math]::Round([int]$Matches[1]/1024,0) }
-        return 0
-    }
-    $memTotal = GetMemMB "MemTotal"; $memFree = GetMemMB "MemFree"; $memAvail = GetMemMB "MemAvailable"
-    $_avail   = if ($memAvail -gt 0) { $memAvail } else { $memFree }
-    $memUsed  = $memTotal - $_avail
-    $memPct   = if ($memTotal -gt 0) { [math]::Round($memUsed/$memTotal*100,0) } else { 0 }
+        # Cargar TODOS los archivos relevantes (firmware + partes NV/EFS)
+        $allFiles = Get-ChildItem $source -Recurse -File |
+                    Where-Object { $_.FullName -notlike "*\Organizados\*" }
 
-    # Parse particiones relevantes
-    $relevantes = @("/data","/system","/vendor","/cache","/sdcard","/storage/emulated","/product","/odm")
-    $partRows = @()
-    if ($dfRaw) {
-        foreach ($line in $dfRaw) {
-            $l = "$line".Trim(); if (-not $l) { continue }
-            if ($l -match "^Filesystem|^Size") { continue }
-            $mostrar = $false
-            foreach ($r in $relevantes) { if ($l -match [regex]::Escape($r)) { $mostrar=$true; break } }
-            if (-not $mostrar) { continue }
-            # Parse: Filesystem Size Used Avail Use% MountedOn
-            $parts = $l -split "\s+"
-            if ($parts.Count -ge 6) {
-                $pct = if ($parts[-2] -match "(\d+)%") { [int]$Matches[1] } else { 0 }
-                $partRows += @{Mount=$parts[-1]; Size=$parts[1]; Used=$parts[2]; Avail=$parts[3]; Pct=$pct}
+        # Extensiones de firmware movil estandar
+        $fwExts = "zip|rar|tgz|gz|7z|img|tar|md5|ffu|qcn|bin|lz4|ext4|erofs|sparse"
+
+        $files = $allFiles | Where-Object { $_.Extension -imatch "\.($fwExts)$" }
+
+        if ($files.Count -eq 0) { CtrlLog "[!] No se encontraron archivos de firmware."; return }
+        CtrlLog "[+] $($files.Count) archivos candidatos."
+        CtrlLog ""
+
+        $movidos = 0; $duplicados = 0; $omitidos = 0
+        $procesados = [System.Collections.Generic.HashSet[string]]::new()
+
+        # ================================================================
+        # FASE 1: GRUPOS ESPECIALES - NV/EFS con correlacion horaria (+-5 min)
+        # ================================================================
+        CtrlLog "[FASE 1] Detectando grupos NV/EFS por correlacion horaria..."
+
+        # Mapear archivos NV/EFS por nombre base
+        $nvNames  = @("nvram","nvdata","protect1","protect2","efs","sec_efs","nvcfg","nvbk")
+        $nvFiles  = $allFiles | Where-Object {
+            $b = $_.BaseName.ToLower() -replace "\..*",""
+            $nvNames | Where-Object { $b -match $_ }
+        }
+
+        # Agrupar por ventana de tiempo de 5 minutos
+        $grupos = @{}
+        foreach ($nf in $nvFiles) {
+            $slot = [math]::Floor(($nf.LastWriteTime - [datetime]"2000-01-01").TotalMinutes / 5)
+            $key  = "NV_$slot"
+            if (-not $grupos[$key]) { $grupos[$key] = [System.Collections.Generic.List[object]]::new() }
+            $grupos[$key].Add($nf)
+        }
+
+        foreach ($key in $grupos.Keys) {
+            $grp = $grupos[$key]
+            if ($grp.Count -lt 2) { continue }  # necesita al menos nvram+nvdata
+
+            $nombres   = $grp | ForEach-Object { $_.BaseName.ToLower() -replace "\..*","" }
+            $tieneNv   = ($nombres | Where-Object { $_ -match "nvram|nvdata" }).Count -ge 1
+            if (-not $tieneNv) { continue }
+
+            $tieneEfs  = ($nombres | Where-Object { $_ -match "^efs$|sec_efs" }).Count -ge 1
+            $tieneProt = ($nombres | Where-Object { $_ -match "protect1|protect2" }).Count -ge 1
+
+            $ts = $grp[0].LastWriteTime.ToString("yyyyMMdd_HHmm")
+            $carpetaNombre = if ($tieneEfs) {
+                "EFS_Full_Backup_$ts"
+            } elseif ($tieneProt) {
+                "NV_Protect_Backup_$ts"
+            } else {
+                "NV_Backup_$ts"
+            }
+
+            $destGrupo = Join-Path $dest $carpetaNombre
+            New-Item $destGrupo -ItemType Directory -Force | Out-Null
+            CtrlLog "  [GRUPO] $carpetaNombre ($($grp.Count) archivos)"
+
+            foreach ($gf in $grp) {
+                if ($procesados.Contains($gf.FullName)) { continue }
+                $tgt = Join-Path $destGrupo $gf.Name
+                if (Test-Path $tgt) {
+                    $b2=$gf.BaseName; $e2=$gf.Extension; $v=2
+                    do { $tgt = Join-Path $destGrupo "${b2}_v${v}${e2}"; $v++ } while (Test-Path $tgt)
+                    $duplicados++
+                }
+                Move-Item $gf.FullName $tgt -Force
+                $procesados.Add($gf.FullName) | Out-Null
+                CtrlLog "    -> $($gf.Name)"
+                $movidos++
+            }
+            [System.Windows.Forms.Application]::DoEvents()
+        }
+
+        # ================================================================
+        # FASE 2: ARCHIVOS ESPECIALES (.ffu, .qcn)
+        # ================================================================
+        CtrlLog ""
+        CtrlLog "[FASE 2] Detectando .ffu y .qcn..."
+
+        foreach ($file in ($files | Where-Object { -not $procesados.Contains($_.FullName) })) {
+            $ext = $file.Extension.ToLower()
+            $destEsp = $null
+
+            if ($ext -eq ".ffu") { $destEsp = Join-Path $dest "EMC_Firmware" }
+            elseif ($ext -eq ".qcn") { $destEsp = Join-Path $dest "QCN_File" }
+
+            if ($destEsp) {
+                New-Item $destEsp -ItemType Directory -Force | Out-Null
+                $tgt = Join-Path $destEsp $file.Name
+                if (Test-Path $tgt) {
+                    $b2=$file.BaseName; $e2=$file.Extension; $v=2
+                    do { $tgt = Join-Path $destEsp "${b2}_v${v}${e2}"; $v++ } while (Test-Path $tgt)
+                    $duplicados++
+                }
+                Move-Item $file.FullName $tgt -Force
+                $procesados.Add($file.FullName) | Out-Null
+                CtrlLog "  [$(($ext).ToUpper() -replace '.')] $($file.Name) -> $(Split-Path $destEsp -Leaf)"
+                $movidos++
             }
         }
-    }
 
-    CtrlLog "[+] Datos listos. Abriendo panel visual..."
-    $btn.Enabled=$true; $btn.Text="ALMACENAMIENTO"
+        # ================================================================
+        # FASE 3: FIRMWARE GENERAL - con filtro de vinculacion
+        # ================================================================
+        CtrlLog ""
+        CtrlLog "[FASE 3] Organizando firmware por marca/modelo..."
 
-    # ---- Mini UI visual ----
-    $frmSt = New-Object System.Windows.Forms.Form
-    $frmSt.Text="ALMACENAMIENTO - RNX TOOL PRO"
-    $frmSt.ClientSize = New-Object System.Drawing.Size(620, 500)
-    $frmSt.BackColor  = [System.Drawing.Color]::FromArgb(15,15,20)
-    $frmSt.FormBorderStyle="FixedDialog"; $frmSt.StartPosition="CenterScreen"; $frmSt.TopMost=$true
+        foreach ($file in ($files | Where-Object { -not $procesados.Contains($_.FullName) })) {
+            $name = $file.Name.ToLower()
 
-    # Titulo
-    $lbT=New-Object Windows.Forms.Label; $lbT.Text="  ALMACENAMIENTO Y MEMORIA"
-    $lbT.Location=New-Object System.Drawing.Point(0,0); $lbT.Size=New-Object System.Drawing.Size(620,32)
-    $lbT.BackColor=[System.Drawing.Color]::FromArgb(0,140,255); $lbT.ForeColor=[System.Drawing.Color]::White
-    $lbT.Font=New-Object System.Drawing.Font("Segoe UI",11,[System.Drawing.FontStyle]::Bold)
-    $lbT.TextAlign="MiddleLeft"; $frmSt.Controls.Add($lbT)
+            # Filtro de vinculacion: si no hay match a dispositivo movil, skip
+            if ($name -notmatch $vinculacionPattern) {
+                CtrlLog "  [SKIP] $($file.Name) - sin referencia a dispositivo movil"
+                $omitidos++
+                $procesados.Add($file.FullName) | Out-Null
+                continue
+            }
 
-    $y = 42
+            # Deteccion de marca
+            if     ($name -match "miui|redmi|poco|xiaomi|_rn\d|_mi\d|_poco")  { $brand = "Xiaomi" }
+            elseif ($name -match "sm-|samsung|galaxy")                          { $brand = "Samsung" }
+            elseif ($name -match "xt\d|moto|motorola")                        { $brand = "Motorola" }
+            elseif ($name -match "oppo")                                         { $brand = "Oppo" }
+            elseif ($name -match "vivo")                                     { $brand = "Vivo" }
+            elseif ($name -match "realme")                                       { $brand = "Realme" }
+            elseif ($name -match "tecno|camon|spark")                            { $brand = "Tecno" }
+            elseif ($name -match "itel")                                     { $brand = "Itel" }
+            elseif ($name -match "huawei|honor")                                 { $brand = "Huawei" }
+            elseif ($name -match "oneplus")                                      { $brand = "OnePlus" }
+            elseif ($name -match "pixel")                                        { $brand = "Google" }
+            elseif ($name -match "iphone")                                       { $brand = "Apple" }
+            elseif ($name -match "nokia")                                    { $brand = "Nokia" }
+            elseif ($name -match "lg")                                       { $brand = "LG" }
+            elseif ($name -match "htc")                                      { $brand = "HTC" }
+            elseif ($name -match "sony|xperia")                                  { $brand = "Sony" }
+            else                                                                  { $brand = "Otros" }
 
-    # --- Funcion helper: dibujar barra de uso ---
-    function Draw-StorageBar($parent, $label, $usedPct, $usedStr, $totalStr, $yPos, $clrFill) {
-        $BAR_W=580; $BAR_H=28; $X=18
+            # Deteccion de modelo (heuristica ampliada)
+            $modelo = ""
+            if     ($name -match "(sm-[a-z0-9]{4,8})")    { $modelo = $Matches[1].ToUpper() }
+            elseif ($name -match "(xt\d{3,5}[a-z]?)")     { $modelo = $Matches[1].ToUpper() }
+            elseif ($name -match "miui_([a-z0-9_]+?)_v")  { $modelo = ($Matches[1] -replace "_"," ").Trim() }
+            elseif ($name -match "_(rn\d+[a-z]?)[_\.]")   { $modelo = "Redmi Note $($Matches[1] -replace 'rn','')" }
+            elseif ($name -match "_(m\d+[a-z]?)[_\.]")    { $modelo = $Matches[1].ToUpper() }
+            elseif ($name -match "_(cph\d+)[_\.]")        { $modelo = $Matches[1].ToUpper() }
+            elseif ($name -match "_(v\d{4}[a-z]?)[_\.]")  { $modelo = $Matches[1].ToUpper() }
+            elseif ($name -match "(pixel[ _]\d[a-z ]*)")   { $modelo = ($Matches[1] -replace "[ _]"," ").Trim() }
 
-        $lbName=New-Object Windows.Forms.Label; $lbName.Text=$label
-        $lbName.Location=New-Object System.Drawing.Point($X,$yPos); $lbName.Size=New-Object System.Drawing.Size(200,16)
-        $lbName.ForeColor=[System.Drawing.Color]::FromArgb(180,180,200)
-        $lbName.Font=New-Object System.Drawing.Font("Segoe UI",8)
-        $parent.Controls.Add($lbName)
+            $destPath = if ($modelo) {
+                Join-Path $dest (Join-Path $brand $modelo)
+            } else {
+                Join-Path $dest $brand
+            }
+            New-Item $destPath -ItemType Directory -Force | Out-Null
 
-        $lbVal=New-Object Windows.Forms.Label
-        $lbVal.Text="$usedStr usados de $totalStr  ($usedPct%)"
-        $lbVal.Location=New-Object System.Drawing.Point(220,$yPos); $lbVal.Size=New-Object System.Drawing.Size(380,16)
-        $lbVal.ForeColor=[System.Drawing.Color]::FromArgb(140,140,160)
-        $lbVal.Font=New-Object System.Drawing.Font("Segoe UI",7.5); $lbVal.TextAlign="MiddleRight"
-        $parent.Controls.Add($lbVal)
+            $target = Join-Path $destPath $file.Name
+            if (Test-Path $target) {
+                $base = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
+                $ext2 = $file.Extension; $v = 2
+                do { $target = Join-Path $destPath "${base}_v${v}${ext2}"; $v++ } while (Test-Path $target)
+                $duplicados++
+                CtrlLog "  [DUP] $($file.Name) -> $([System.IO.Path]::GetFileName($target))"
+            }
 
-        # Barra de fondo
-        $pnlBg=New-Object Windows.Forms.Panel; $pnlBg.Location=New-Object System.Drawing.Point($X,($yPos+18))
-        $pnlBg.Size=New-Object System.Drawing.Size($BAR_W,$BAR_H)
-        $pnlBg.BackColor=[System.Drawing.Color]::FromArgb(35,35,45); $parent.Controls.Add($pnlBg)
-
-        # Barra rellena
-        $fillW = [math]::Max(4,[int]($BAR_W * $usedPct / 100))
-        $pnlFill=New-Object Windows.Forms.Panel; $pnlFill.Location=New-Object System.Drawing.Point(0,0)
-        $pnlFill.Size=New-Object System.Drawing.Size($fillW,$BAR_H)
-        $pnlFill.BackColor=$clrFill; $pnlBg.Controls.Add($pnlFill)
-
-        # % label centrado en la barra
-        $lbPct2=New-Object Windows.Forms.Label; $lbPct2.Text="$usedPct%"
-        $lbPct2.Location=New-Object System.Drawing.Point(0,0); $lbPct2.Size=New-Object System.Drawing.Size($BAR_W,$BAR_H)
-        $lbPct2.ForeColor=[System.Drawing.Color]::White
-        $lbPct2.Font=New-Object System.Drawing.Font("Segoe UI",8.5,[System.Drawing.FontStyle]::Bold)
-        $lbPct2.TextAlign="MiddleCenter"; $pnlBg.Controls.Add($lbPct2)
-
-        return $yPos + $BAR_H + 22
-    }
-
-    # ---- RAM ----
-    $lbRamHdr=New-Object Windows.Forms.Label; $lbRamHdr.Text="  MEMORIA RAM"
-    $lbRamHdr.Location=New-Object System.Drawing.Point(0,$y); $lbRamHdr.Size=New-Object System.Drawing.Size(620,22)
-    $lbRamHdr.BackColor=[System.Drawing.Color]::FromArgb(30,30,45); $lbRamHdr.ForeColor=[System.Drawing.Color]::Cyan
-    $lbRamHdr.Font=New-Object System.Drawing.Font("Segoe UI",9,[System.Drawing.FontStyle]::Bold)
-    $lbRamHdr.TextAlign="MiddleLeft"; $frmSt.Controls.Add($lbRamHdr)
-    $y += 24
-
-    $ramClr = if ($memPct -ge 85) { [System.Drawing.Color]::FromArgb(220,60,60) }
-              elseif ($memPct -ge 65) { [System.Drawing.Color]::FromArgb(220,150,0) }
-              else { [System.Drawing.Color]::FromArgb(0,180,100) }
-    $y = Draw-StorageBar $frmSt "RAM" $memPct "${memUsed} MB" "${memTotal} MB" $y $ramClr
-    $y += 6
-
-    # ---- PARTICIONES ----
-    $lbPartHdr=New-Object Windows.Forms.Label; $lbPartHdr.Text="  PARTICIONES ANDROID"
-    $lbPartHdr.Location=New-Object System.Drawing.Point(0,$y); $lbPartHdr.Size=New-Object System.Drawing.Size(620,22)
-    $lbPartHdr.BackColor=[System.Drawing.Color]::FromArgb(30,30,45); $lbPartHdr.ForeColor=[System.Drawing.Color]::FromArgb(255,200,0)
-    $lbPartHdr.Font=New-Object System.Drawing.Font("Segoe UI",9,[System.Drawing.FontStyle]::Bold)
-    $lbPartHdr.TextAlign="MiddleLeft"; $frmSt.Controls.Add($lbPartHdr)
-    $y += 24
-
-    if ($partRows.Count -eq 0) {
-        $lbNoPart=New-Object Windows.Forms.Label; $lbNoPart.Text="  No se pudieron leer particiones (df -h)"
-        $lbNoPart.Location=New-Object System.Drawing.Point(18,$y); $lbNoPart.Size=New-Object System.Drawing.Size(580,20)
-        $lbNoPart.ForeColor=[System.Drawing.Color]::Gray
-        $lbNoPart.Font=New-Object System.Drawing.Font("Segoe UI",8); $frmSt.Controls.Add($lbNoPart)
-        $y += 24
-    } else {
-        foreach ($row in $partRows) {
-            if ($y -gt 440) { break }
-            $pct = $row.Pct
-            $clr = if ($pct -ge 90) { [System.Drawing.Color]::FromArgb(220,60,60) }
-                   elseif ($pct -ge 75) { [System.Drawing.Color]::FromArgb(220,150,0) }
-                   else { [System.Drawing.Color]::FromArgb(0,150,220) }
-            $lbl = $row.Mount
-            if ($lbl.Length -gt 22) { $lbl = "..." + $lbl.Substring($lbl.Length-19) }
-            $y = Draw-StorageBar $frmSt $lbl $pct $row.Used $row.Size $y $clr
+            Move-Item $file.FullName $target -Force
+            $procesados.Add($file.FullName) | Out-Null
+            $rel = "$brand$(if($modelo){`"/$modelo`"})"
+            CtrlLog "  [OK] $($file.Name) -> $rel"
+            $movidos++
+            [System.Windows.Forms.Application]::DoEvents()
         }
-    }
 
-    # Boton cerrar
-    $btnCl=New-Object Windows.Forms.Button; $btnCl.Text="CERRAR"
-    $btnCl.Location=New-Object System.Drawing.Point(230,460); $btnCl.Size=New-Object System.Drawing.Size(160,32)
-    $btnCl.FlatStyle="Flat"; $btnCl.ForeColor=[System.Drawing.Color]::LightGray
-    $btnCl.FlatAppearance.BorderColor=[System.Drawing.Color]::FromArgb(80,80,80)
-    $btnCl.BackColor=[System.Drawing.Color]::FromArgb(30,30,40)
-    $btnCl.Font=New-Object System.Drawing.Font("Segoe UI",9,[System.Drawing.FontStyle]::Bold)
-    $btnCl.Add_Click({ $frmSt.Close() }); $frmSt.Controls.Add($btnCl)
+        CtrlLog ""
+        CtrlLog "=============================================="
+        CtrlLog "  RESUMEN ORGANIZAR FIRMWARE"
+        CtrlLog "=============================================="
+        CtrlLog "  Movidos     : $movidos"
+        CtrlLog "  Duplicados  : $duplicados (renombrados _v2, _v3...)"
+        CtrlLog "  Omitidos    : $omitidos (sin vinculacion a celular)"
+        CtrlLog "  Destino     : $dest"
+        CtrlLog "=============================================="
 
-    $frmSt.ShowDialog() | Out-Null
+        $abrir = [System.Windows.Forms.MessageBox]::Show(
+            "Firmware organizado.`n`nMovidos  : $movidos`nOmitidos : $omitidos`n`nAbrir carpeta destino?",
+            "LISTO", "YesNo", "Information")
+        if ($abrir -eq "Yes") { Start-Process explorer.exe $dest }
+
+    } catch { CtrlLog "[!] Error: $_" }
+    finally  { $btn.Enabled=$true; $btn.Text="ORGANIZAR FIRMWARE" }
 })
 
-# ---- C2[3]: APPS INSTALADAS ----
-$btnsC2[3].Add_Click({
-    $btn=$btnsC2[3]; $btn.Enabled=$false; $btn.Text="LEYENDO..."
+# ---- [1] RENOMBRAR ARCHIVOS ----
+$btnsC2[1].Add_Click({
+    $btn = $btnsC2[1]; $btn.Enabled=$false; $btn.Text="RENOMBRANDO..."
     [System.Windows.Forms.Application]::DoEvents()
-    CtrlLog ""
-    CtrlLog "=== APPS INSTALADAS ==="
+    try {
+        CtrlLog ""
+        CtrlLog "=============================================="
+        CtrlLog "  RENOMBRAR ARCHIVOS - RNX TOOL PRO"
+        CtrlLog "=============================================="
+        CtrlLog "[~] Selecciona carpeta con archivos a renombrar..."
 
-    if (-not (Check-ADB)) { CtrlLog "[!] Sin dispositivo ADB."; $btn.Enabled=$true; $btn.Text="APPS INSTALADAS"; return }
+        $fb = New-Object System.Windows.Forms.FolderBrowserDialog
+        $fb.Description = "Selecciona carpeta para renombrar archivos"
+        if ($fb.ShowDialog() -ne "OK") { CtrlLog "[~] Cancelado."; return }
 
-    CtrlLog "[~] Contando paquetes..."
-    $pkgUser   = (& adb shell "pm list packages -3"  2>$null) | Where-Object { $_ -match "package:" }
-    $pkgSystem = (& adb shell "pm list packages -s"  2>$null) | Where-Object { $_ -match "package:" }
-    $pkgDis    = (& adb shell "pm list packages -d"  2>$null) | Where-Object { $_ -match "package:" }
+        $files = Get-ChildItem $fb.SelectedPath -File
+        if ($files.Count -eq 0) { CtrlLog "[!] No hay archivos en la carpeta."; return }
+        CtrlLog "[+] $($files.Count) archivos encontrados."
+        CtrlLog ""
 
-    $cU = $pkgUser.Count; $cS = $pkgSystem.Count; $cD = $pkgDis.Count
-    CtrlLog "[+] Apps usuario    : $cU"
-    CtrlLog "[+] Apps sistema    : $cS"
-    CtrlLog "[+] Desactivadas    : $cD"
-    CtrlLog "[+] TOTAL           : $($cU+$cS)"
-    CtrlLog ""
+        $renombrados = 0; $sin_cambios = 0
 
-    $frmApps = New-Object System.Windows.Forms.Form
-    $frmApps.Text="APPS INSTALADAS - RNX TOOL PRO"
-    $frmApps.ClientSize=New-Object System.Drawing.Size(480,360)
-    $frmApps.BackColor=[System.Drawing.Color]::FromArgb(20,20,20)
-    $frmApps.FormBorderStyle="FixedDialog"; $frmApps.StartPosition="CenterScreen"
-    $frmApps.TopMost=$true
+        foreach ($file in $files) {
+            $nuevo = $file.Name
+            # Reglas de limpieza
+            $nuevo = $nuevo.ToLower()
+            $nuevo = $nuevo -replace "\s+", "_"          # espacios -> _
+            $nuevo = $nuevo -replace "[\(\)\[\]\{\}]", "" # quitar parentesis/corchetes
+            $nuevo = $nuevo -replace "[áéíóúàèìòùâêîôû]", { $args[0].Value -replace "á","a" -replace "é","e" -replace "í","i" -replace "ó","o" -replace "ú","u" }
+            $nuevo = $nuevo -replace "[^a-z0-9_\.\-]", "" # solo alfanumericos, _, ., -
+            $nuevo = $nuevo -replace "_{2,}", "_"          # dobles _ -> uno solo
+            $nuevo = $nuevo.Trim("_")
 
-    $lbInfo=New-Object Windows.Forms.Label
-    $lbInfo.Text="Usuario: $cU  |  Sistema: $cS  |  Desactivadas: $cD  |  TOTAL: $($cU+$cS)"
-    $lbInfo.Location=New-Object System.Drawing.Point(14,10); $lbInfo.Size=New-Object System.Drawing.Size(452,18)
-    $lbInfo.ForeColor=[System.Drawing.Color]::Cyan
-    $lbInfo.Font=New-Object System.Drawing.Font("Segoe UI",8,[System.Drawing.FontStyle]::Bold)
-    $frmApps.Controls.Add($lbInfo)
+            if ($nuevo -eq $file.Name) { $sin_cambios++; continue }
 
-    function MakeAppBtn($txt,$x,$y,$clr,$data,$tipoPm) {
-        $b=New-Object Windows.Forms.Button; $b.Text=$txt
-        $b.Location=New-Object System.Drawing.Point($x,$y); $b.Size=New-Object System.Drawing.Size(218,30)
-        $b.FlatStyle="Flat"; $b.ForeColor=[System.Drawing.Color]::$clr
-        $b.FlatAppearance.BorderColor=[System.Drawing.Color]::$clr
-        $b.BackColor=[System.Drawing.Color]::FromArgb(30,30,30)
-        $b.Font=New-Object System.Drawing.Font("Segoe UI",7.5,[System.Drawing.FontStyle]::Bold)
-        $b.Tag=@{data=$data;tipo=$tipoPm}
-        $b.Add_Click({
-            $pkgs=$this.Tag.data; $tipo=$this.Tag.tipo
-            $txt2=New-Object System.Windows.Forms.Form
-            $txt2.Text="Lista de paquetes ($tipo)"; $txt2.ClientSize=New-Object System.Drawing.Size(560,480)
-            $txt2.BackColor=[System.Drawing.Color]::FromArgb(15,15,15); $txt2.StartPosition="CenterScreen"
-            $txt2.TopMost=$true; $txt2.Owner=$frmApps
-            $tb=New-Object Windows.Forms.TextBox; $tb.Multiline=$true; $tb.ReadOnly=$true; $tb.ScrollBars="Vertical"
-            $tb.Location=New-Object System.Drawing.Point(8,8); $tb.Size=New-Object System.Drawing.Size(544,428)
-            $tb.BackColor=[System.Drawing.Color]::FromArgb(15,15,15); $tb.ForeColor=[System.Drawing.Color]::Lime
-            $tb.Font=New-Object System.Drawing.Font("Consolas",8)
-            $sb=[System.Text.StringBuilder]::new()
-            $i=0
-            foreach ($p in $pkgs) {
-                $i++; $name=$p -replace "^package:",""; $sb.AppendLine("[$i] $name") | Out-Null
-                if ($tipo -eq "USUARIO") {
-                    $sb.AppendLine("     Desinstalar : adb shell pm uninstall $name") | Out-Null
-                } elseif ($tipo -eq "SISTEMA") {
-                    $sb.AppendLine("     Desactivar  : adb shell pm disable-user $name") | Out-Null
+            $target = Join-Path $file.DirectoryName $nuevo
+            # Evitar colision
+            if (Test-Path $target) {
+                $base = [System.IO.Path]::GetFileNameWithoutExtension($nuevo)
+                $ext  = [System.IO.Path]::GetExtension($nuevo)
+                $v = 2
+                do { $target = Join-Path $file.DirectoryName "${base}_v${v}${ext}"; $v++ } while (Test-Path $target)
+                $nuevo = [System.IO.Path]::GetFileName($target)
+            }
+
+            Rename-Item $file.FullName $target
+            CtrlLog "  [OK] $($file.Name)"
+            CtrlLog "       -> $nuevo"
+            $renombrados++
+            [System.Windows.Forms.Application]::DoEvents()
+        }
+
+        CtrlLog ""
+        CtrlLog "  Renombrados : $renombrados"
+        CtrlLog "  Sin cambios : $sin_cambios"
+        CtrlLog "=============================================="
+
+    } catch { CtrlLog "[!] Error: $_" }
+    finally  { $btn.Enabled=$true; $btn.Text="RENOMBRAR ARCHIVOS" }
+})
+
+# ---- [2] EXTRAER FIRMWARE ----
+$btnsC2[2].Add_Click({
+    $btn = $btnsC2[2]; $btn.Enabled=$false; $btn.Text="EXTRAYENDO..."
+    [System.Windows.Forms.Application]::DoEvents()
+    try {
+        CtrlLog ""
+        CtrlLog "=============================================="
+        CtrlLog "  EXTRAER FIRMWARE - RNX TOOL PRO v2"
+        CtrlLog "=============================================="
+
+        $fd = New-Object System.Windows.Forms.OpenFileDialog
+        $fd.Filter = "Firmware (*.zip;*.rar;*.7z;*.tgz;*.tar;*.gz;*.tar.md5;*.md5)|*.zip;*.rar;*.7z;*.tgz;*.tar;*.gz;*.md5|Todos|*.*"
+        $fd.Title  = "Selecciona archivo de firmware a extraer"
+        if ($fd.ShowDialog() -ne "OK") { CtrlLog "[~] Cancelado."; return }
+
+        $archPath = $fd.FileName
+        $archName = [System.IO.Path]::GetFileName($archPath)
+        $archSz   = [math]::Round((Get-Item $archPath).Length / 1MB, 2)
+        $ext      = [System.IO.Path]::GetExtension($archPath).ToLower()
+        $base     = [System.IO.Path]::GetFileNameWithoutExtension($archPath) -replace "\.tar$",""
+
+        $dest = Join-Path ([System.IO.Path]::GetDirectoryName($archPath)) ($base + "_extraido")
+        New-Item $dest -ItemType Directory -Force | Out-Null
+
+        CtrlLog "[+] Archivo : $archName ($archSz MB)"
+        CtrlLog "[+] Destino : $dest"
+        CtrlLog "[~] Preparando extraccion..."
+
+        # Buscar 7z
+        $7z = $null
+        foreach ($c in @(
+            (Join-Path $script:TOOLS_DIR "7z.exe"),
+            "C:\Program Files\7-Zip\7z.exe",
+            "C:\Program Files (x86)\7-Zip\7z.exe"
+        )) { if (Test-Path $c) { $7z = $c; break } }
+
+        $isTar   = ($ext -match "\.(tar|md5|tgz|gz)$") -or ($archPath -imatch "\.tar\.md5$")
+        $isZip   = ($ext -eq ".zip")
+        $is7zRar = ($ext -match "\.(7z|rar)$")
+
+        # ---- Ventana de progreso ----
+        $ui = Show-ExtractProgress $archName
+        $ui.LblStatus.Text = "Iniciando..."; [System.Windows.Forms.Application]::DoEvents()
+
+        try {
+            if ($isZip -and -not $7z) {
+                # ZIP nativo con progreso por entrada
+                $ui.LblStatus.Text = "Extrayendo ZIP (nativo)..."
+                $ui.Bar.Value = 5; [System.Windows.Forms.Application]::DoEvents()
+                Add-Type -AssemblyName System.IO.Compression.FileSystem
+                $zip   = [System.IO.Compression.ZipFile]::OpenRead($archPath)
+                $total = $zip.Entries.Count; $done = 0
+                foreach ($entry in $zip.Entries) {
+                    $outPath = [System.IO.Path]::Combine($dest, $entry.FullName)
+                    $outDir  = [System.IO.Path]::GetDirectoryName($outPath)
+                    if (-not (Test-Path $outDir)) { New-Item $outDir -ItemType Directory -Force | Out-Null }
+                    if (-not $entry.FullName.EndsWith("/")) {
+                        [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $outPath, $true)
+                    }
+                    $done++
+                    $pct = [int](($done / $total) * 95) + 4
+                    $ui.Bar.Value   = [Math]::Min($pct, 98)
+                    $ui.LblPct.Text = "$pct%"
+                    $ui.LblFile.Text = $entry.Name
+                    $ui.LblStatus.Text = "[$done/$total] $($entry.Name)"
+                    if ($done % 4 -eq 0) { [System.Windows.Forms.Application]::DoEvents() }
+                }
+                $zip.Dispose()
+                $ui.Bar.Value = 100; $ui.LblPct.Text = "100%"
+                [System.Windows.Forms.Application]::DoEvents()
+                CtrlLog "[OK] ZIP extraido (PowerShell nativo)"
+
+            } elseif ($7z) {
+                # 7z con progreso via archivo de log temporal (evita freeze total de UI)
+                $ui.LblStatus.Text = "Extrayendo con 7z ($ext)..."
+                $ui.Bar.Value = 5; [System.Windows.Forms.Application]::DoEvents()
+
+                $logFile = [System.IO.Path]::GetTempFileName()
+                try {
+                    # Lanzar 7z redirigiendo TODO a archivo de log (sin pipes que bloquean)
+                    $psi = New-Object System.Diagnostics.ProcessStartInfo
+                    $psi.FileName    = $7z
+                    $psi.Arguments   = "x `"$archPath`" `"-o$dest`" -y -bsp1 -bso1 -bse1"
+                    $psi.UseShellExecute        = $false
+                    $psi.RedirectStandardOutput = $false
+                    $psi.RedirectStandardError  = $false
+                    $psi.CreateNoWindow         = $true
+                    # Redirigir stdout al archivo via cmd /c
+                    $psi.FileName  = "cmd.exe"
+                    $psi.Arguments = "/c `"`"$7z`" x `"$archPath`" `"-o$dest`" -y -bsp1 -bso1 -bse1 > `"$logFile`" 2>&1`""
+
+                    $proc = [System.Diagnostics.Process]::Start($psi)
+                    $lastPos = 0
+                    while (-not $proc.HasExited) {
+                        Start-Sleep -Milliseconds 120
+                        [System.Windows.Forms.Application]::DoEvents()
+                        # Leer lineas nuevas del log
+                        try {
+                            $fs = [System.IO.File]::Open($logFile, [System.IO.FileMode]::Open,
+                                  [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                            $fs.Seek($lastPos, [System.IO.SeekOrigin]::Begin) | Out-Null
+                            $sr = New-Object System.IO.StreamReader($fs)
+                            $chunk = $sr.ReadToEnd()
+                            $lastPos = $fs.Position
+                            $sr.Dispose(); $fs.Dispose()
+                            foreach ($l in ($chunk -split "`n")) {
+                                $l = $l.Trim()
+                                if ($l -match "(\d+)%") {
+                                    $pct = [int]$Matches[1]
+                                    $ui.Bar.Value   = [Math]::Min(5 + [int]($pct * 0.93), 98)
+                                    $ui.LblPct.Text = "$pct%"
+                                }
+                                if ($l -match "\- (.+)$") {
+                                    $ui.LblFile.Text   = $Matches[1].Trim()
+                                    $ui.LblStatus.Text = $Matches[1].Trim()
+                                }
+                            }
+                        } catch {}
+                    }
+                    $proc.WaitForExit()
+                    $ui.Bar.Value = 100; $ui.LblPct.Text = "100%"
+                    [System.Windows.Forms.Application]::DoEvents()
+
+                    if ($proc.ExitCode -ne 0) { CtrlLog "[!] 7z salio con codigo $($proc.ExitCode)" }
+                    else { CtrlLog "[OK] Extraccion completada con 7z" }
+                } finally {
+                    try { Remove-Item $logFile -Force -EA SilentlyContinue } catch {}
+                }
+
+                # Manejo TAR interno (tgz / tar.md5)
+                if ($isTar) {
+                    $innerTar = Get-ChildItem $dest -Recurse -File |
+                                Where-Object { $_.Extension -imatch "\.(tar)$" } | Select-Object -First 1
+                    if ($innerTar) {
+                        CtrlLog "[~] TAR interno: $($innerTar.Name) - extrayendo imgs/..."
+                        $ui.LblStatus.Text = "TAR interno: $($innerTar.Name)"
+                        $ui.Bar.Value = 50; [System.Windows.Forms.Application]::DoEvents()
+                        $destInner = Join-Path $dest "imgs"
+                        New-Item $destInner -ItemType Directory -Force | Out-Null
+                        & $7z x "$($innerTar.FullName)" "-o$destInner" -y 2>&1 | Out-Null
+                        $ui.Bar.Value = 100; $ui.LblPct.Text = "100%"
+                        [System.Windows.Forms.Application]::DoEvents()
+                        CtrlLog "[OK] TAR interno extraido en: imgs/"
+                    }
+                }
+
+            } else {
+                # Fallback: tar nativo
+                $ui.LblStatus.Text = "Extrayendo con tar nativo..."
+                $ui.Bar.Value = 10; [System.Windows.Forms.Application]::DoEvents()
+                if (Get-Command tar -ErrorAction SilentlyContinue) {
+                    & tar -xf "$archPath" -C "$dest" 2>&1 | Out-Null
+                    $ui.Bar.Value = 100; $ui.LblPct.Text = "100%"
+                    [System.Windows.Forms.Application]::DoEvents()
+                    CtrlLog "[OK] Extraido con tar nativo"
+                } else {
+                    CtrlLog "[!] No se encontro 7z.exe ni tar."
+                    CtrlLog "[~] Coloca 7z.exe en .\tools\ o instala 7-Zip"
+                    return
                 }
             }
-            $tb.Text=$sb.ToString(); $txt2.Controls.Add($tb); $txt2.ShowDialog() | Out-Null
-        })
-        $frmApps.Controls.Add($b)
-    }
+        } finally {
+            Start-Sleep -Milliseconds 400
+            if ($ui -and $ui.Win -and -not $ui.Win.IsDisposed) {
+                try { $ui.Win.Close() } catch {}
+            }
+        }
 
-    MakeAppBtn "LISTAR USUARIO ($cU)"    14  40 "Lime"   $pkgUser   "USUARIO"
-    MakeAppBtn "LISTAR SISTEMA ($cS)"   248  40 "Cyan"   $pkgSystem "SISTEMA"
-    MakeAppBtn "LISTAR DESACTIVADAS ($cD)" 14 78 "Orange" $pkgDis "DESACTIVADA"
+        $archivos = (Get-ChildItem $dest -Recurse -File).Count
+        CtrlLog ""
+        CtrlLog "  Archivos extraidos : $archivos"
+        CtrlLog "  Carpeta            : $dest"
+        CtrlLog "=============================================="
 
-    $btnClose2=New-Object Windows.Forms.Button; $btnClose2.Text="CERRAR"
-    $btnClose2.Location=New-Object System.Drawing.Point(164,112); $btnClose2.Size=New-Object System.Drawing.Size(152,34)
-    $btnClose2.FlatStyle="Flat"; $btnClose2.ForeColor=[System.Drawing.Color]::Gray
-    $btnClose2.FlatAppearance.BorderColor=[System.Drawing.Color]::Gray
-    $btnClose2.BackColor=[System.Drawing.Color]::FromArgb(30,30,30)
-    $btnClose2.Font=New-Object System.Drawing.Font("Segoe UI",8,[System.Drawing.FontStyle]::Bold)
-    $btnClose2.Add_Click({ $frmApps.Close() }); $frmApps.Controls.Add($btnClose2)
-    $frmApps.ShowDialog() | Out-Null
+        $abrir = [System.Windows.Forms.MessageBox]::Show(
+            "Extraccion completada.`n$archivos archivos.`n`nAbrir carpeta?",
+            "EXTRAIDO", "YesNo", "Information")
+        if ($abrir -eq "Yes") { Start-Process explorer.exe $dest }
 
-    $btn.Enabled=$true; $btn.Text="APPS INSTALADAS"
+    } catch { CtrlLog "[!] Error: $_" }
+    finally  { $btn.Enabled=$true; $btn.Text="EXTRAER FIRMWARE" }
+})
+# ---- [3] VERIFICAR CHECKSUM ----
+$btnsC2[3].Add_Click({
+    $btn = $btnsC2[3]; $btn.Enabled=$false; $btn.Text="CALCULANDO..."
+    [System.Windows.Forms.Application]::DoEvents()
+    try {
+        CtrlLog ""
+        CtrlLog "=============================================="
+        CtrlLog "  VERIFICAR CHECKSUM - RNX TOOL PRO"
+        CtrlLog "=============================================="
+
+        $fd = New-Object System.Windows.Forms.OpenFileDialog
+        $fd.Filter = "Todos los archivos|*.*"
+        $fd.Title  = "Selecciona archivo para verificar checksum"
+        if ($fd.ShowDialog() -ne "OK") { CtrlLog "[~] Cancelado."; return }
+
+        $archPath = $fd.FileName
+        $archName = [System.IO.Path]::GetFileName($archPath)
+        $archSz   = [math]::Round((Get-Item $archPath).Length / 1MB, 2)
+
+        CtrlLog "[+] Archivo : $archName ($archSz MB)"
+        CtrlLog "[~] Calculando MD5..."
+        $md5  = (Get-FileHash $archPath -Algorithm MD5).Hash
+        CtrlLog "[~] Calculando SHA256..."
+        $sha256 = (Get-FileHash $archPath -Algorithm SHA256).Hash
+        CtrlLog "[~] Calculando SHA1..."
+        $sha1 = (Get-FileHash $archPath -Algorithm SHA1).Hash
+
+        CtrlLog ""
+        CtrlLog "  MD5    : $md5"
+        CtrlLog "  SHA1   : $sha1"
+        CtrlLog "  SHA256 : $sha256"
+        CtrlLog ""
+
+        # Opcion de comparacion
+        Add-Type -AssemblyName Microsoft.VisualBasic
+        $esperado = [Microsoft.VisualBasic.Interaction]::InputBox(
+            "Pega el hash esperado para comparar (opcional):`n(MD5, SHA1 o SHA256 - deja vacio para saltar)",
+            "COMPARAR HASH", "")
+
+        if ($esperado -and $esperado.Trim() -ne "") {
+            $esperado = $esperado.Trim().ToUpper()
+            $coincide = ($esperado -eq $md5) -or ($esperado -eq $sha1) -or ($esperado -eq $sha256)
+            if ($coincide) {
+                CtrlLog "  VERIFICACION : [OK] HASH CORRECTO - Archivo integro"
+                [System.Windows.Forms.MessageBox]::Show(
+                    "HASH VERIFICADO`n`nEl archivo es integro y coincide con el hash esperado.",
+                    "OK", "OK", "Information") | Out-Null
+            } else {
+                CtrlLog "  VERIFICACION : [ERROR] HASH NO COINCIDE - Archivo puede estar corrupto"
+                [System.Windows.Forms.MessageBox]::Show(
+                    "HASH NO COINCIDE`n`nEl archivo puede estar corrupto o es incorrecto.`n`nEsperado: $esperado`nMD5: $md5",
+                    "ERROR", "OK", "Warning") | Out-Null
+            }
+        }
+
+        # Guardar log de checksum
+        $logPath = Join-Path ([System.IO.Path]::GetDirectoryName($archPath)) "$archName.checksum.txt"
+        @(
+            "Archivo : $archName",
+            "Tamaño  : $archSz MB",
+            "Fecha   : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
+            "",
+            "MD5    : $md5",
+            "SHA1   : $sha1",
+            "SHA256 : $sha256"
+        ) | Out-File $logPath -Encoding UTF8
+        CtrlLog "  Log guardado : $([System.IO.Path]::GetFileName($logPath))"
+        CtrlLog "=============================================="
+
+    } catch { CtrlLog "[!] Error: $_" }
+    finally  { $btn.Enabled=$true; $btn.Text="VERIFICAR CHECKSUM" }
 })
 
 #==========================================================================

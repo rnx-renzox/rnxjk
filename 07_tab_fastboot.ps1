@@ -1455,6 +1455,7 @@ $fbBtnDebloat.Add_Click({
 
 # --------------------------------------------------------------------------
 # BOTON: XIAOMI IMEI TOOLS (lanza XiaomiIMEITools.exe)
+# Busca en carpetas del PC primero antes de pedir al usuario
 # --------------------------------------------------------------------------
 $fbBtnXiaoUtils.Add_Click({
     $btn = $fbBtnXiaoUtils
@@ -1464,19 +1465,55 @@ $fbBtnXiaoUtils.Add_Click({
     FbLog ""
     FbLog "[*] === XIAOMI IMEI TOOLS ==="
     FbLog ""
+    FbLog "[~] Buscando en carpetas del sistema..."
 
-    $candidates = @(
+    $exePath = $null
+
+    # 1. Rutas directas conocidas (tools\ y subcarpetas)
+    $directPaths = @(
         (Join-Path $script:TOOLS_DIR "XiaomiIMEITools.exe"),
         (Join-Path $script:TOOLS_DIR "xiaomiimeitools.exe"),
+        (Join-Path $script:TOOLS_DIR "imei\XiaomiIMEITools.exe"),
+        (Join-Path $script:TOOLS_DIR "xiaomi\XiaomiIMEITools.exe"),
         (Join-Path $script:SCRIPT_ROOT "XiaomiIMEITools.exe"),
         (Join-Path $script:SCRIPT_ROOT "tools\XiaomiIMEITools.exe"),
         ".\XiaomiIMEITools.exe",
-        ".\tools\XiaomiIMEITools.exe"
+        ".	ools\XiaomiIMEITools.exe"
     )
-
-    $exePath = $null
-    foreach ($c in $candidates) {
+    foreach ($c in $directPaths) {
         if ($c -and (Test-Path $c -EA SilentlyContinue)) { $exePath = $c; break }
+    }
+
+    # 2. Busqueda recursiva en tools\ completa
+    if (-not $exePath) {
+        FbLog "[~] Buscando en tools\ recursivamente..."
+        $found = Get-ChildItem $script:TOOLS_DIR -Recurse -File -EA SilentlyContinue |
+                 Where-Object { $_.Name -imatch "xiaomi.*imei|imei.*xiaomi|XiaomiIMEI" -and $_.Extension -imatch "\.exe$" } |
+                 Select-Object -First 1
+        if ($found) { $exePath = $found.FullName }
+    }
+
+    # 3. Program Files
+    if (-not $exePath) {
+        FbLog "[~] Buscando en Program Files..."
+        foreach ($pf in @($env:ProgramFiles, "${env:ProgramFiles(x86)}", "$env:LOCALAPPDATA\Programs")) {
+            if (-not $pf -or -not (Test-Path $pf -EA SilentlyContinue)) { continue }
+            $found = Get-ChildItem $pf -Recurse -Filter "*XiaomiIMEI*" -EA SilentlyContinue |
+                     Where-Object { $_.Extension -imatch "\.exe$" } | Select-Object -First 1
+            if ($found) { $exePath = $found.FullName; break }
+        }
+    }
+
+    # 4. Desktop, Documents, Downloads
+    if (-not $exePath) {
+        FbLog "[~] Buscando en Escritorio y carpetas de usuario..."
+        foreach ($dir in @("$env:USERPROFILE\Desktop","$env:USERPROFILE\Documents","$env:USERPROFILE\Downloads")) {
+            if (-not (Test-Path $dir -EA SilentlyContinue)) { continue }
+            $found = Get-ChildItem $dir -Recurse -File -EA SilentlyContinue |
+                     Where-Object { $_.Name -imatch "xiaomi.*imei|imei.*xiaomi|XiaomiIMEI" -and $_.Extension -imatch "\.exe$" } |
+                     Select-Object -First 1
+            if ($found) { $exePath = $found.FullName; break }
+        }
     }
 
     if ($exePath) {
@@ -1489,26 +1526,36 @@ $fbBtnXiaoUtils.Add_Click({
             FbLog "    - Leer y escribir IMEI via DIAG"
             FbLog "    - Verificar EFS integrity"
             FbLog "    - Reparar IMEI en Xiaomi/Redmi/POCO"
-        } catch { FbLog "[!] Error al abrir: $_" }
+            FbLog "[i] Activa el puerto DIAG antes con el boton 'ACTIVAR DIAG'"
+        } catch {
+            FbLog "[~] Intentando sin elevacion..."
+            try { Start-Process $exePath; FbLog "[OK] Abierto." }
+            catch { FbLog "[!] Error al abrir: $_" }
+        }
     } else {
-        FbLog "[!] XiaomiIMEITools.exe no encontrado."
+        FbLog "[!] XiaomiIMEITools.exe no encontrado en el sistema."
         FbLog ""
-        FbLog "    Coloca XiaomiIMEITools.exe en una de estas rutas:"
-        foreach ($c in $candidates[0..3]) { FbLog "    - $c" }
+        FbLog "    Coloca XiaomiIMEITools.exe en alguna de estas rutas:"
+        FbLog "    - $($script:TOOLS_DIR)"
+        FbLog "    - $($script:TOOLS_DIR)\imei\"
+        FbLog "    - $($script:TOOLS_DIR)\xiaomi\"
         FbLog ""
         FbLog "[i] Antes de usar XiaomiIMEITools activa el puerto DIAG"
         FbLog "    con el boton 'ACTIVAR DIAG' de esta misma tab."
 
         $resp = [System.Windows.Forms.MessageBox]::Show(
-            "XiaomiIMEITools.exe no encontrado en la carpeta tools\`n`nColoca XiaomiIMEITools.exe en:`n$($script:TOOLS_DIR)",
+            "XiaomiIMEITools.exe no encontrado en el sistema.`n`nColoca XiaomiIMEITools.exe en:`n$($script:TOOLS_DIR)`n`nSubcarpetas validas: imei\ o xiaomi\",
             "XiaomiIMEITools no encontrado", "OK", "Warning")
     }
 
     $btn.Enabled = $true; $btn.Text = "XIAOMI IMEI TOOLS"
 })
 
+
 # --------------------------------------------------------------------------
-# BOTON: DESCARGA DE FIRMWARES (mini interfase)
+# BOTON: DESCARGA DE FIRMWARES - mifirm.net  (mini interfaz estilo SamFW)
+# Modo 1: Auto-identificar codename/region via ADB
+# Modo 2: Busqueda manual por codename o modelo
 # --------------------------------------------------------------------------
 $fbBtnFirmDL.Add_Click({
     $btn = $fbBtnFirmDL
@@ -1516,180 +1563,251 @@ $fbBtnFirmDL.Add_Click({
     [System.Windows.Forms.Application]::DoEvents()
 
     FbLog ""
-    FbLog "[*] === DESCARGA DE FIRMWARES ==="
+    FbLog "================================================"
+    FbLog "   MIFIRM FIRMWARE DOWNLOADER  -  RNX TOOL PRO"
+    FbLog "   $(Get-Date -Format 'dd/MM/yyyy  HH:mm:ss')"
+    FbLog "================================================"
     FbLog ""
 
-    # Intentar obtener modelo del dispositivo conectado
-    $modelAuto = ""
-    $modoAuto  = Detect-DeviceMode
-    if ($modoAuto -eq "adb") {
-        $modelAuto = SafeShellXu "getprop ro.product.device"
-    }
+    $frmMiFirm = New-Object System.Windows.Forms.Form
+    $frmMiFirm.Text = "MiFirm Firmware Downloader - RNX TOOL PRO"
+    $frmMiFirm.ClientSize = New-Object System.Drawing.Size(560, 400)
+    $frmMiFirm.BackColor = [System.Drawing.Color]::FromArgb(14,14,22)
+    $frmMiFirm.FormBorderStyle = "FixedDialog"
+    $frmMiFirm.StartPosition = "CenterScreen"
+    $frmMiFirm.TopMost = $true
 
-    # Mini form descarga de firmwares
-    $frmFW = New-Object System.Windows.Forms.Form
-    $frmFW.Text          = "DESCARGA DE FIRMWARES - RNX TOOL PRO"
-    $frmFW.ClientSize    = New-Object System.Drawing.Size(580,440)
-    $frmFW.BackColor     = [System.Drawing.Color]::FromArgb(15,15,20)
-    $frmFW.FormBorderStyle = "FixedDialog"
-    $frmFW.StartPosition = "CenterScreen"
-    $frmFW.TopMost       = $true
+    # Header
+    $lbHdrMi = New-Object Windows.Forms.Label
+    $lbHdrMi.Text      = "  MIFIRM FIRMWARE DOWNLOADER"
+    $lbHdrMi.Location  = New-Object System.Drawing.Point(0,0)
+    $lbHdrMi.Size      = New-Object System.Drawing.Size(560,34)
+    $lbHdrMi.BackColor = [System.Drawing.Color]::FromArgb(200,80,0)
+    $lbHdrMi.ForeColor = [System.Drawing.Color]::White
+    $lbHdrMi.Font      = New-Object System.Drawing.Font("Segoe UI",11,[System.Drawing.FontStyle]::Bold)
+    $lbHdrMi.TextAlign = "MiddleLeft"
+    $frmMiFirm.Controls.Add($lbHdrMi)
 
-    $lbHdrFW = New-Object Windows.Forms.Label
-    $lbHdrFW.Text      = "  DESCARGA DE FIRMWARES XIAOMI"
-    $lbHdrFW.Location  = New-Object System.Drawing.Point(0,0)
-    $lbHdrFW.Size      = New-Object System.Drawing.Size(580,32)
-    $lbHdrFW.BackColor = [System.Drawing.Color]::FromArgb(0,120,60)
-    $lbHdrFW.ForeColor = [System.Drawing.Color]::White
-    $lbHdrFW.Font      = New-Object System.Drawing.Font("Segoe UI",11,[System.Drawing.FontStyle]::Bold)
-    $lbHdrFW.TextAlign = "MiddleLeft"
-    $frmFW.Controls.Add($lbHdrFW)
+    # ---- SECCION A: Auto-identificar por ADB ----
+    $pnlAutoMi = New-Object Windows.Forms.Panel
+    $pnlAutoMi.Location  = New-Object System.Drawing.Point(10,44)
+    $pnlAutoMi.Size      = New-Object System.Drawing.Size(538,165)
+    $pnlAutoMi.BackColor = [System.Drawing.Color]::FromArgb(20,20,32)
+    $pnlAutoMi.BorderStyle = "FixedSingle"
+    $frmMiFirm.Controls.Add($pnlAutoMi)
 
-    # Campo modelo
-    $lbModelo = New-Object Windows.Forms.Label
-    $lbModelo.Text     = "CODENAME / MODELO:"
-    $lbModelo.Location = New-Object System.Drawing.Point(14,44)
-    $lbModelo.AutoSize = $true
-    $lbModelo.ForeColor= [System.Drawing.Color]::Lime
-    $lbModelo.Font     = New-Object System.Drawing.Font("Segoe UI",8,[System.Drawing.FontStyle]::Bold)
-    $frmFW.Controls.Add($lbModelo)
+    $lbAutoTitleMi = New-Object Windows.Forms.Label
+    $lbAutoTitleMi.Text      = "  MODO 1: Auto-identificar (requiere dispositivo Xiaomi/MIUI por ADB)"
+    $lbAutoTitleMi.Location  = New-Object System.Drawing.Point(0,0)
+    $lbAutoTitleMi.Size      = New-Object System.Drawing.Size(538,26)
+    $lbAutoTitleMi.BackColor = [System.Drawing.Color]::FromArgb(140,50,0)
+    $lbAutoTitleMi.ForeColor = [System.Drawing.Color]::White
+    $lbAutoTitleMi.Font      = New-Object System.Drawing.Font("Segoe UI",8.5,[System.Drawing.FontStyle]::Bold)
+    $lbAutoTitleMi.TextAlign = "MiddleLeft"
+    $pnlAutoMi.Controls.Add($lbAutoTitleMi)
 
-    $txtModelo = New-Object Windows.Forms.TextBox
-    $txtModelo.Location  = New-Object System.Drawing.Point(14,62)
-    $txtModelo.Size      = New-Object System.Drawing.Size(200,24)
-    $txtModelo.BackColor = [System.Drawing.Color]::FromArgb(28,28,38)
-    $txtModelo.ForeColor = [System.Drawing.Color]::Lime
-    $txtModelo.Font      = New-Object System.Drawing.Font("Consolas",9)
-    $txtModelo.Text      = $modelAuto
-    $frmFW.Controls.Add($txtModelo)
+    $lbMiModel = New-Object Windows.Forms.Label
+    $lbMiModel.Text     = "Modelo  : --"
+    $lbMiModel.Location = New-Object System.Drawing.Point(14,34)
+    $lbMiModel.Size     = New-Object System.Drawing.Size(510,18)
+    $lbMiModel.ForeColor = [System.Drawing.Color]::Lime
+    $lbMiModel.Font     = New-Object System.Drawing.Font("Consolas",9)
+    $pnlAutoMi.Controls.Add($lbMiModel)
 
-    if ($modelAuto -ne "") {
-        $lbAutoDetect = New-Object Windows.Forms.Label
-        $lbAutoDetect.Text     = "(detectado automaticamente)"
-        $lbAutoDetect.Location = New-Object System.Drawing.Point(220,66)
-        $lbAutoDetect.AutoSize = $true
-        $lbAutoDetect.ForeColor= [System.Drawing.Color]::FromArgb(0,160,80)
-        $lbAutoDetect.Font     = New-Object System.Drawing.Font("Segoe UI",7.5)
-        $frmFW.Controls.Add($lbAutoDetect)
-    }
+    $lbMiRegion = New-Object Windows.Forms.Label
+    $lbMiRegion.Text     = "Region  : --"
+    $lbMiRegion.Location = New-Object System.Drawing.Point(14,54)
+    $lbMiRegion.Size     = New-Object System.Drawing.Size(510,18)
+    $lbMiRegion.ForeColor = [System.Drawing.Color]::Lime
+    $lbMiRegion.Font     = New-Object System.Drawing.Font("Consolas",9)
+    $pnlAutoMi.Controls.Add($lbMiRegion)
 
-    # Fuentes de descarga
-    $fuentes = @(
-        @{
-            Nombre  = "XIAOMI FIRMWARE UPDATER (GITHUB)"
-            Desc    = "Firmwares estables/dev para todos los mercados. Busqueda por codename."
-            URL_Base= "https://xiaomifirmwareupdater.com"
-            URL_Tpl = "https://xiaomifirmwareupdater.com/firmware/{0}/"
-            Color   = "Cyan"
-        }
-        @{
-            Nombre  = "MIUI UPDATES TRACKER"
-            Desc    = "Historial de actualizaciones MIUI / HyperOS. ROMs globales y CN."
-            URL_Base= "https://miuiupdates.org"
-            URL_Tpl = "https://miuiupdates.org/{0}"
-            Color   = "Orange"
-        }
-        @{
-            Nombre  = "XIAOMI EUROPA (XIAOMI.EU)"
-            Desc    = "ROMs internacionales con servicios Google activos y sin ads."
-            URL_Base= "https://xiaomi.eu/community/forums/miui-rom-releases.101/"
-            URL_Tpl = ""
-            Color   = "Lime"
-        }
-        @{
-            Nombre  = "EVOLUTION X / LINEAGEOS (XDA)"
-            Desc    = "ROMs custom Android puro. Buscar por codename en XDA Developers."
-            URL_Base= "https://xdaforums.com"
-            URL_Tpl = "https://xdaforums.com/search/?q={0}+rom&type=thread"
-            Color   = "Magenta"
-        }
-        @{
-            Nombre  = "HYPEROS / MIUI OFICIAL (XIAOMI)"
-            Desc    = "Descarga oficial de ROMs desde el portal de Xiaomi."
-            URL_Base= "https://www.miui.com/zt/miuiHistory.html"
-            URL_Tpl = ""
-            Color   = "Yellow"
-        }
-    )
+    $lbMiBuild = New-Object Windows.Forms.Label
+    $lbMiBuild.Text     = "Build   : --"
+    $lbMiBuild.Location = New-Object System.Drawing.Point(14,74)
+    $lbMiBuild.Size     = New-Object System.Drawing.Size(510,18)
+    $lbMiBuild.ForeColor = [System.Drawing.Color]::FromArgb(180,180,180)
+    $lbMiBuild.Font     = New-Object System.Drawing.Font("Consolas",8)
+    $pnlAutoMi.Controls.Add($lbMiBuild)
 
-    $yF = 100
-    foreach ($f in $fuentes) {
-        $pnlF = New-Object Windows.Forms.Panel
-        $pnlF.Location  = New-Object System.Drawing.Point(12,$yF)
-        $pnlF.Size      = New-Object System.Drawing.Size(556,62)
-        $pnlF.BackColor = [System.Drawing.Color]::FromArgb(22,22,30)
-        $pnlF.BorderStyle = "FixedSingle"
-        $frmFW.Controls.Add($pnlF)
+    $lbMiUrl = New-Object Windows.Forms.Label
+    $lbMiUrl.Text     = "URL     : --"
+    $lbMiUrl.Location = New-Object System.Drawing.Point(14,94)
+    $lbMiUrl.Size     = New-Object System.Drawing.Size(510,18)
+    $lbMiUrl.ForeColor = [System.Drawing.Color]::Cyan
+    $lbMiUrl.Font     = New-Object System.Drawing.Font("Consolas",7.5)
+    $pnlAutoMi.Controls.Add($lbMiUrl)
 
-        $lbFNom = New-Object Windows.Forms.Label
-        $lbFNom.Text      = $f.Nombre
-        $lbFNom.Location  = New-Object System.Drawing.Point(8,6)
-        $lbFNom.Size      = New-Object System.Drawing.Size(430,18)
-        $lbFNom.ForeColor = [System.Drawing.Color]::($f.Color)
-        $lbFNom.Font      = New-Object System.Drawing.Font("Segoe UI",8,[System.Drawing.FontStyle]::Bold)
-        $pnlF.Controls.Add($lbFNom)
+    $btnAutoDetectMi = New-Object Windows.Forms.Button
+    $btnAutoDetectMi.Text     = "AUTO IDENTIFICAR"
+    $btnAutoDetectMi.Location = New-Object System.Drawing.Point(14,126)
+    $btnAutoDetectMi.Size     = New-Object System.Drawing.Size(160,30)
+    $btnAutoDetectMi.FlatStyle = "Flat"
+    $btnAutoDetectMi.ForeColor = [System.Drawing.Color]::Lime
+    $btnAutoDetectMi.FlatAppearance.BorderColor = [System.Drawing.Color]::Lime
+    $btnAutoDetectMi.BackColor = [System.Drawing.Color]::FromArgb(15,35,15)
+    $btnAutoDetectMi.Font     = New-Object System.Drawing.Font("Segoe UI",8,[System.Drawing.FontStyle]::Bold)
+    $pnlAutoMi.Controls.Add($btnAutoDetectMi)
 
-        $lbFDesc = New-Object Windows.Forms.Label
-        $lbFDesc.Text     = $f.Desc
-        $lbFDesc.Location = New-Object System.Drawing.Point(8,26)
-        $lbFDesc.Size     = New-Object System.Drawing.Size(430,16)
-        $lbFDesc.ForeColor= [System.Drawing.Color]::FromArgb(120,120,130)
-        $lbFDesc.Font     = New-Object System.Drawing.Font("Segoe UI",7.5)
-        $pnlF.Controls.Add($lbFDesc)
+    $btnAutoOpenMi = New-Object Windows.Forms.Button
+    $btnAutoOpenMi.Text     = "IR A MIFIRM"
+    $btnAutoOpenMi.Location = New-Object System.Drawing.Point(184,126)
+    $btnAutoOpenMi.Size     = New-Object System.Drawing.Size(130,30)
+    $btnAutoOpenMi.FlatStyle = "Flat"
+    $btnAutoOpenMi.ForeColor = [System.Drawing.Color]::White
+    $btnAutoOpenMi.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(200,80,0)
+    $btnAutoOpenMi.BackColor = [System.Drawing.Color]::FromArgb(80,30,0)
+    $btnAutoOpenMi.Font     = New-Object System.Drawing.Font("Segoe UI",8,[System.Drawing.FontStyle]::Bold)
+    $btnAutoOpenMi.Enabled  = $false
+    $pnlAutoMi.Controls.Add($btnAutoOpenMi)
 
-        $lbFUrl = New-Object Windows.Forms.Label
-        $lbFUrl.Text      = $f.URL_Base
-        $lbFUrl.Location  = New-Object System.Drawing.Point(8,44)
-        $lbFUrl.Size      = New-Object System.Drawing.Size(430,14)
-        $lbFUrl.ForeColor = [System.Drawing.Color]::FromArgb(60,100,200)
-        $lbFUrl.Font      = New-Object System.Drawing.Font("Consolas",7)
-        $pnlF.Controls.Add($lbFUrl)
+    $script:MiFirm_AutoURL = ""
 
-        $btnFOpen = New-Object Windows.Forms.Button
-        $btnFOpen.Text     = "ABRIR"
-        $btnFOpen.Location = New-Object System.Drawing.Point(462,12)
-        $btnFOpen.Size     = New-Object System.Drawing.Size(84,38)
-        $btnFOpen.FlatStyle = "Flat"
-        $btnFOpen.ForeColor = [System.Drawing.Color]::($f.Color)
-        $btnFOpen.FlatAppearance.BorderColor = [System.Drawing.Color]::($f.Color)
-        $btnFOpen.BackColor = [System.Drawing.Color]::FromArgb(20,20,30)
-        $btnFOpen.Font      = New-Object System.Drawing.Font("Segoe UI",8,[System.Drawing.FontStyle]::Bold)
-        $btnFOpen.Tag       = @{ URLTpl=$f.URL_Tpl; URLBase=$f.URL_Base }
-        $btnFOpen.Add_Click({
-            $modelo2 = $txtModelo.Text.Trim()
-            $urlData = $this.Tag
-            $url = if ($urlData.URLTpl -ne "" -and $modelo2 -ne "") {
-                [string]::Format($urlData.URLTpl, $modelo2)
+    $btnAutoDetectMi.Add_Click({
+        $btnAutoDetectMi.Enabled = $false; $btnAutoDetectMi.Text = "LEYENDO..."
+        [System.Windows.Forms.Application]::DoEvents()
+        try {
+            $miBrand    = SafeShellXu "getprop ro.product.brand"
+            $miModel    = SafeShellXu "getprop ro.product.model"
+            $miCodename = SafeShellXu "getprop ro.product.device"
+            $miBuild    = SafeShellXu "getprop ro.build.display.id"
+            $miMiui     = SafeShellXu "getprop ro.miui.ui.version.name"
+            if (-not $miCodename) { $miCodename = SafeShellXu "getprop ro.product.name" }
+            $miRegion   = SafeShellXu "getprop ro.miui.region"
+            if (-not $miRegion) { $miRegion = SafeShellXu "getprop ro.product.locale" }
+            if (-not $miRegion) { $miRegion = SafeShellXu "getprop persist.sys.locale" }
+
+            if (-not $miModel) {
+                $lbMiModel.Text     = "Modelo  : [Sin dispositivo ADB/Fastboot]"
+                $lbMiModel.ForeColor = [System.Drawing.Color]::OrangeRed
+            } elseif ($miBrand -notmatch "xiaomi|redmi|poco") {
+                $lbMiModel.Text     = "Modelo  : $miModel  [$miBrand] - Solo Xiaomi/Redmi/POCO"
+                $lbMiModel.ForeColor = [System.Drawing.Color]::OrangeRed
             } else {
-                $urlData.URLBase
+                $lbMiModel.Text      = "Modelo  : $miModel  (codename: $miCodename)"
+                $lbMiModel.ForeColor = [System.Drawing.Color]::Lime
+                $lbMiRegion.Text     = "Region  : $(if($miRegion){$miRegion}else{'NO DETECTADA'})"
+                $lbMiBuild.Text      = "Build   : $miBuild  |  MIUI/HyperOS: $miMiui"
+                $miUrl = if ($miCodename) { "https://mifirm.net/model/$miCodename" } else { "https://mifirm.net/" }
+                $lbMiUrl.Text       = "URL     : $miUrl"
+                $script:MiFirm_AutoURL = $miUrl
+                $btnAutoOpenMi.Enabled = $true
+                FbLog "[+] Auto-detecto: $miModel | Codename: $miCodename | Region: $miRegion"
+                FbLog "[+] URL: $miUrl"
             }
-            try {
-                Start-Process $url
-                FbLog "[OK] Abriendo: $url"
-            } catch { FbLog "[!] Error: $_" }
-        })
-        $pnlF.Controls.Add($btnFOpen)
+        } catch {
+            $lbMiModel.Text      = "Error: $_"
+            $lbMiModel.ForeColor = [System.Drawing.Color]::Red
+        }
+        $btnAutoDetectMi.Enabled = $true; $btnAutoDetectMi.Text = "AUTO IDENTIFICAR"
+    })
 
-        $yF += 68
-    }
+    $btnAutoOpenMi.Add_Click({
+        if ($script:MiFirm_AutoURL) {
+            try { Start-Process $script:MiFirm_AutoURL; FbLog "[OK] Navegador abierto: $($script:MiFirm_AutoURL)" }
+            catch { FbLog "[!] Error: $_" }
+        }
+    })
 
-    $btnCerrarFW = New-Object Windows.Forms.Button
-    $btnCerrarFW.Text     = "CERRAR"
-    $btnCerrarFW.Location = New-Object System.Drawing.Point(210,($yF+4))
-    $btnCerrarFW.Size     = New-Object System.Drawing.Size(160,30)
-    $btnCerrarFW.FlatStyle = "Flat"
-    $btnCerrarFW.ForeColor = [System.Drawing.Color]::Gray
-    $btnCerrarFW.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(70,70,70)
-    $btnCerrarFW.BackColor = [System.Drawing.Color]::FromArgb(22,22,30)
-    $btnCerrarFW.Font      = New-Object System.Drawing.Font("Segoe UI",8.5,[System.Drawing.FontStyle]::Bold)
-    $btnCerrarFW.Add_Click({ $frmFW.Close() })
-    $frmFW.Controls.Add($btnCerrarFW)
+    # ---- SECCION B: Busqueda manual ----
+    $pnlManualMi = New-Object Windows.Forms.Panel
+    $pnlManualMi.Location  = New-Object System.Drawing.Point(10,220)
+    $pnlManualMi.Size      = New-Object System.Drawing.Size(538,140)
+    $pnlManualMi.BackColor = [System.Drawing.Color]::FromArgb(20,20,32)
+    $pnlManualMi.BorderStyle = "FixedSingle"
+    $frmMiFirm.Controls.Add($pnlManualMi)
 
-    # Ajustar alto del form
-    $frmFW.ClientSize = New-Object System.Drawing.Size(580,($yF+48))
+    $lbManTitleMi = New-Object Windows.Forms.Label
+    $lbManTitleMi.Text      = "  MODO 2: Buscar por codename o modelo (sin telefono conectado)"
+    $lbManTitleMi.Location  = New-Object System.Drawing.Point(0,0)
+    $lbManTitleMi.Size      = New-Object System.Drawing.Size(538,26)
+    $lbManTitleMi.BackColor = [System.Drawing.Color]::FromArgb(60,40,0)
+    $lbManTitleMi.ForeColor = [System.Drawing.Color]::White
+    $lbManTitleMi.Font      = New-Object System.Drawing.Font("Segoe UI",8.5,[System.Drawing.FontStyle]::Bold)
+    $lbManTitleMi.TextAlign = "MiddleLeft"
+    $pnlManualMi.Controls.Add($lbManTitleMi)
 
-    $frmFW.ShowDialog() | Out-Null
+    $lbManMiModel = New-Object Windows.Forms.Label
+    $lbManMiModel.Text     = "Codename/Modelo:"
+    $lbManMiModel.Location = New-Object System.Drawing.Point(14,36)
+    $lbManMiModel.Size     = New-Object System.Drawing.Size(120,20)
+    $lbManMiModel.ForeColor = [System.Drawing.Color]::LightGray
+    $lbManMiModel.Font     = New-Object System.Drawing.Font("Segoe UI",8)
+    $pnlManualMi.Controls.Add($lbManMiModel)
+
+    $txtManMiModel = New-Object Windows.Forms.TextBox
+    $txtManMiModel.Location  = New-Object System.Drawing.Point(142,34)
+    $txtManMiModel.Size      = New-Object System.Drawing.Size(150,24)
+    $txtManMiModel.BackColor = [System.Drawing.Color]::FromArgb(30,30,45)
+    $txtManMiModel.ForeColor = [System.Drawing.Color]::White
+    $txtManMiModel.BorderStyle = "FixedSingle"
+    $txtManMiModel.Font      = New-Object System.Drawing.Font("Consolas",9,[System.Drawing.FontStyle]::Bold)
+    $txtManMiModel.Text      = ""
+    $pnlManualMi.Controls.Add($txtManMiModel)
+
+    $lbManMiHint = New-Object Windows.Forms.Label
+    $lbManMiHint.Text     = "Ej: marble, pissarro, sweet, veux, spes, rosemary, melt..."
+    $lbManMiHint.Location = New-Object System.Drawing.Point(14,64)
+    $lbManMiHint.Size     = New-Object System.Drawing.Size(510,16)
+    $lbManMiHint.ForeColor = [System.Drawing.Color]::FromArgb(100,100,120)
+    $lbManMiHint.Font     = New-Object System.Drawing.Font("Segoe UI",7.5)
+    $pnlManualMi.Controls.Add($lbManMiHint)
+
+    $lbManMiHint2 = New-Object Windows.Forms.Label
+    $lbManMiHint2.Text     = "Tambien puedes buscar por modelo: Redmi Note 12, POCO X5 Pro..."
+    $lbManMiHint2.Location = New-Object System.Drawing.Point(14,82)
+    $lbManMiHint2.Size     = New-Object System.Drawing.Size(510,16)
+    $lbManMiHint2.ForeColor = [System.Drawing.Color]::FromArgb(80,80,100)
+    $lbManMiHint2.Font     = New-Object System.Drawing.Font("Segoe UI",7)
+    $pnlManualMi.Controls.Add($lbManMiHint2)
+
+    $btnManOpenMi = New-Object Windows.Forms.Button
+    $btnManOpenMi.Text     = "BUSCAR EN MIFIRM"
+    $btnManOpenMi.Location = New-Object System.Drawing.Point(310,30)
+    $btnManOpenMi.Size     = New-Object System.Drawing.Size(150,60)
+    $btnManOpenMi.FlatStyle = "Flat"
+    $btnManOpenMi.ForeColor = [System.Drawing.Color]::FromArgb(255,160,0)
+    $btnManOpenMi.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(255,160,0)
+    $btnManOpenMi.BackColor = [System.Drawing.Color]::FromArgb(45,30,0)
+    $btnManOpenMi.Font     = New-Object System.Drawing.Font("Segoe UI",8.5,[System.Drawing.FontStyle]::Bold)
+    $pnlManualMi.Controls.Add($btnManOpenMi)
+
+    $btnManOpenMi.Add_Click({
+        $manInput = $txtManMiModel.Text.Trim()
+        if (-not $manInput) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Ingresa el codename o modelo Xiaomi`n(ej: marble, sweet, pissarro, Redmi Note 12)",
+                "Modelo requerido","OK","Warning") | Out-Null
+            return
+        }
+        $manUrl = "https://mifirm.net/model/$manInput"
+        FbLog "[+] Busqueda manual: $manInput"
+        FbLog "[+] URL: $manUrl"
+        try { Start-Process $manUrl; FbLog "[OK] Navegador abierto" }
+        catch { FbLog "[!] Error: $_" }
+    })
+
+    # Boton cerrar
+    $btnCloseMi = New-Object Windows.Forms.Button
+    $btnCloseMi.Text     = "CERRAR"
+    $btnCloseMi.Location = New-Object System.Drawing.Point(200,366)
+    $btnCloseMi.Size     = New-Object System.Drawing.Size(160,28)
+    $btnCloseMi.FlatStyle = "Flat"
+    $btnCloseMi.ForeColor = [System.Drawing.Color]::Gray
+    $btnCloseMi.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(70,70,70)
+    $btnCloseMi.BackColor = [System.Drawing.Color]::FromArgb(25,25,35)
+    $btnCloseMi.Font     = New-Object System.Drawing.Font("Segoe UI",8.5,[System.Drawing.FontStyle]::Bold)
+    $btnCloseMi.Add_Click({ $frmMiFirm.Close() })
+    $frmMiFirm.Controls.Add($btnCloseMi)
+
+    FbLog "[i] Mini interfaz MiFirm abierta"
+    FbLog "    Modo 1: conecta el telefono y usa AUTO IDENTIFICAR"
+    FbLog "    Modo 2: escribe el codename para buscar sin telefono"
+    FbLog "    mifirm.net - base de datos completa de firmwares Xiaomi/Redmi/POCO"
+
+    $frmMiFirm.ShowDialog() | Out-Null
     $btn.Enabled = $true; $btn.Text = "DESCARGA DE FIRMWARES"
 })
+
 
 # Fin: 07_tab_fastboot.ps1 - XIAOMI UTILS
